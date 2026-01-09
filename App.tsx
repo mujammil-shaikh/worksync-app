@@ -1,12 +1,9 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { format, startOfWeek, addDays, isSameDay } from 'date-fns';
-import { Briefcase, AlertTriangle, RefreshCw, Calendar, CheckCircle2, Download, Share, X, Settings, Save } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Briefcase, Download, Share, X, Settings, Save, LayoutGrid, Calculator } from 'lucide-react';
 
-import DayRow from './components/DayRow';
-import WeekChart from './components/WeekChart';
-import { DayLog, WeekStats, UserSettings } from './types';
-import { WEEK_DAYS, WEEKLY_TARGET_HOURS } from './constants';
-import { calculateDuration, calculateWeekStats, decimalToDuration, distributeDeficit, getSmartSuggestions } from './services/timeUtils';
+import WeeklyDashboard from './components/WeeklyDashboard';
+import QuickCalculator from './components/QuickCalculator';
+import { UserSettings } from './types';
 
 const DEFAULT_SETTINGS: UserSettings = {
   standardInTime: "10:30",
@@ -15,12 +12,14 @@ const DEFAULT_SETTINGS: UserSettings = {
   lateBufferMinutes: 30
 };
 
+type ViewMode = 'weekly' | 'calculator';
+
 function App() {
-  const [currentDate] = useState(new Date());
   const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
   const [showIosInstall, setShowIosInstall] = useState(false);
   const [isStandalone, setIsStandalone] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const [viewMode, setViewMode] = useState<ViewMode>('weekly');
   
   // Load settings from local storage or default
   const [settings, setSettings] = useState<UserSettings>(() => {
@@ -32,38 +31,6 @@ function App() {
   useEffect(() => {
     localStorage.setItem('worksync_settings', JSON.stringify(settings));
   }, [settings]);
-
-  // Initialize Week Data
-  const [days, setDays] = useState<DayLog[]>(() => {
-    const monday = startOfWeek(currentDate, { weekStartsOn: 1 });
-    return WEEK_DAYS.map((dayConfig, index) => {
-      const date = addDays(monday, index);
-      return {
-        id: dayConfig.id,
-        label: dayConfig.label,
-        dateStr: format(date, 'MMM dd'),
-        isToday: isSameDay(date, new Date()),
-        punchIn: '',
-        punchOut: '',
-        grossHours: 0,
-        deficit: 0,
-        note: '',
-        status: isSameDay(date, new Date()) ? 'PRESENT' : date < new Date() ? 'PAST' : 'FUTURE',
-        leaveType: 'NONE'
-      } as DayLog;
-    });
-  });
-
-  const [stats, setStats] = useState<WeekStats>({
-    totalWorked: 0,
-    requiredTotal: WEEKLY_TARGET_HOURS,
-    originalTarget: WEEKLY_TARGET_HOURS,
-    totalLeaveDeduction: 0,
-    remainingWeekly: WEEKLY_TARGET_HOURS,
-    weeklyDeficit: 0,
-    projectedTotal: 0,
-    isOnTrack: false
-  });
 
   // Handle PWA Install Prompt & iOS Detection
   useEffect(() => {
@@ -95,60 +62,6 @@ function App() {
     }
   };
 
-  // Recalculate stats whenever days change
-  useEffect(() => {
-    const newStats = calculateWeekStats(days);
-    setStats(newStats);
-  }, [days]);
-
-  // Handler for updating a day
-  const handleUpdateDay = useCallback((id: string, field: keyof DayLog, value: any) => {
-    setDays(prev => {
-      return prev.map(day => {
-        if (day.id === id) {
-          const updatedDay = { ...day, [field]: value };
-          
-          // Logic for Leave changes
-          if (field === 'leaveType') {
-             if (value === 'FULL') {
-               // Clear punches for full leave
-               updatedDay.punchIn = '';
-               updatedDay.punchOut = '';
-               updatedDay.grossHours = 0;
-             } 
-          }
-
-          // Auto-calculate gross hours if times are present
-          if (field === 'punchIn' || field === 'punchOut' || field === 'leaveType') {
-             updatedDay.grossHours = calculateDuration(updatedDay.punchIn, updatedDay.punchOut);
-          }
-          return updatedDay;
-        }
-        return day;
-      });
-    });
-  }, []);
-
-  const handleResetDay = useCallback((id: string) => {
-    setDays(prev => prev.map(day => {
-        if (day.id === id) {
-            return {
-                ...day,
-                punchIn: '',
-                punchOut: '',
-                grossHours: 0
-            };
-        }
-        return day;
-    }));
-  }, []);
-
-  // Auto-Plan / Redistribute Deficit
-  const handleAutoPlan = () => {
-    const updatedDays = distributeDeficit(days, settings);
-    setDays(updatedDays);
-  };
-
   return (
     <div className="min-h-screen bg-slate-50 pb-20 relative">
       {/* Header */}
@@ -158,16 +71,35 @@ function App() {
             <div className="bg-blue-600 p-2 rounded-lg">
                 <Briefcase className="w-5 h-5 text-white" />
             </div>
-            <h1 className="text-xl font-bold text-slate-800 tracking-tight">WorkSync</h1>
+            <h1 className="text-xl font-bold text-slate-800 tracking-tight hidden sm:block">WorkSync</h1>
           </div>
-          <div className="flex items-center gap-4">
+          
+          {/* View Switcher - Center */}
+          <div className="bg-slate-100 p-1 rounded-lg flex items-center gap-1">
+             <button 
+               onClick={() => setViewMode('weekly')}
+               className={`flex items-center gap-2 px-3 py-1.5 rounded-md text-xs font-bold transition-all ${viewMode === 'weekly' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+             >
+                <LayoutGrid className="w-3.5 h-3.5" />
+                Tracker
+             </button>
+             <button 
+               onClick={() => setViewMode('calculator')}
+               className={`flex items-center gap-2 px-3 py-1.5 rounded-md text-xs font-bold transition-all ${viewMode === 'calculator' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+             >
+                <Calculator className="w-3.5 h-3.5" />
+                Calc
+             </button>
+          </div>
+
+          <div className="flex items-center gap-2 sm:gap-4">
              {!isStandalone && (
                <button 
                   onClick={handleInstallClick}
                   className="flex items-center gap-2 text-blue-600 bg-blue-50 hover:bg-blue-100 px-3 py-2 rounded-lg text-sm font-semibold transition-colors"
                >
                   <Download className="w-4 h-4" />
-                  <span>Install</span>
+                  <span className="hidden sm:inline">Install</span>
                </button>
              )}
              
@@ -177,14 +109,6 @@ function App() {
                 title="Settings"
              >
                 <Settings className="w-5 h-5" />
-             </button>
-
-             <button 
-                onClick={handleAutoPlan}
-                className="hidden md:flex items-center gap-2 bg-slate-900 hover:bg-slate-800 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors shadow-lg shadow-slate-200"
-            >
-                <RefreshCw className="w-4 h-4" />
-                <span>Auto-Plan</span>
              </button>
           </div>
         </div>
@@ -217,26 +141,6 @@ function App() {
                       className="w-full p-2 bg-slate-800 text-white border border-slate-700 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
                       style={{ colorScheme: 'dark' }}
                     />
-                 </div>
-
-                 {/* Late Threshold Display */}
-                 <div className="bg-orange-50 p-3 rounded-lg border border-orange-100">
-                    <div className="flex items-center gap-2 text-orange-800 text-sm font-medium">
-                       <AlertTriangle className="w-4 h-4" />
-                       <span>Late Threshold</span>
-                    </div>
-                    <p className="text-xs text-orange-700 mt-1">
-                       You will be marked late if you punch in after <b>{
-                         // Simple logic to show user standard + 30m without complex import
-                         (() => {
-                            const [h, m] = settings.standardInTime.split(':').map(Number);
-                            const total = h * 60 + m + settings.lateBufferMinutes;
-                            const h2 = Math.floor(total / 60);
-                            const m2 = total % 60;
-                            return `${h2.toString().padStart(2,'0')}:${m2.toString().padStart(2,'0')}`;
-                         })()
-                       }</b> (+{settings.lateBufferMinutes}m).
-                    </p>
                  </div>
 
                  {/* Max Out Time Toggle */}
@@ -308,148 +212,12 @@ function App() {
         </div>
       )}
 
-      <main className="max-w-5xl mx-auto px-4 py-8 space-y-8">
-        
-        {/* Top Stats Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100 flex flex-col justify-between">
-                <div>
-                    <div className="flex justify-between items-start">
-                        <span className="text-slate-400 text-xs font-bold uppercase tracking-wider">Worked / Target</span>
-                        {stats.totalLeaveDeduction > 0 && (
-                            <span className="px-2 py-1 bg-purple-100 text-purple-700 text-[10px] font-bold rounded-full">
-                                -{decimalToDuration(stats.totalLeaveDeduction)} Leave Credit
-                            </span>
-                        )}
-                    </div>
-                    <div className="text-3xl font-bold text-slate-900 mt-2">
-                        {decimalToDuration(stats.totalWorked)} 
-                        <span className="text-lg text-slate-400 font-normal"> / {decimalToDuration(stats.requiredTotal)}</span>
-                    </div>
-                </div>
-                <div className="mt-4 w-full bg-slate-100 h-1.5 rounded-full overflow-hidden">
-                    <div 
-                        className="bg-blue-600 h-full rounded-full transition-all duration-500" 
-                        style={{ width: `${Math.min(100, (stats.totalWorked / Math.max(1, stats.requiredTotal)) * 100)}%` }}
-                    ></div>
-                </div>
-            </div>
-
-            <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
-                <span className="text-slate-400 text-xs font-bold uppercase tracking-wider">Remaining to Work</span>
-                <div className="text-3xl font-bold text-slate-900 mt-2">{decimalToDuration(stats.remainingWeekly)}</div>
-                <div className="mt-2 text-sm text-slate-500">
-                    To reach adjusted target
-                </div>
-            </div>
-
-            <div className={`p-6 rounded-2xl shadow-sm border flex flex-col justify-center items-start
-                ${!stats.isOnTrack 
-                    ? 'bg-red-50 border-red-100' 
-                    : 'bg-emerald-50 border-emerald-100'}`
-            }>
-                <div className="flex items-center gap-2 mb-2">
-                    {!stats.isOnTrack 
-                        ? <AlertTriangle className="w-5 h-5 text-red-500" />
-                        : <CheckCircle2 className="w-5 h-5 text-emerald-500" />
-                    }
-                    <span className={`text-sm font-bold uppercase tracking-wider ${!stats.isOnTrack ? 'text-red-600' : 'text-emerald-600'}`}>
-                        {!stats.isOnTrack ? 'Action Needed' : 'On Track'}
-                    </span>
-                </div>
-                <p className={`text-sm ${!stats.isOnTrack ? 'text-red-700' : 'text-emerald-700'}`}>
-                    {!stats.isOnTrack 
-                        ? "You are projected to miss the weekly target. Use Auto-Plan or apply Leave." 
-                        : "Great job! You are on track to meet your adjusted weekly goal."}
-                </p>
-            </div>
-        </div>
-
-        {/* Mobile Auto Plan Button */}
-        <div className="md:hidden">
-             <button 
-                onClick={handleAutoPlan}
-                className="w-full flex items-center justify-center gap-2 bg-slate-900 hover:bg-slate-800 text-white px-4 py-3 rounded-xl text-sm font-medium transition-colors shadow-lg shadow-slate-200"
-            >
-                <RefreshCw className="w-4 h-4" />
-                <span>Auto-Plan Remainder</span>
-             </button>
-        </div>
-
-        {/* Main Content Grid */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-            
-            {/* Days List */}
-            <div className="lg:col-span-2 space-y-4">
-                <div className="flex items-center justify-between mb-2">
-                    <h2 className="text-lg font-bold text-slate-800 flex items-center gap-2">
-                        <Calendar className="w-5 h-5 text-slate-400" />
-                        Weekly Schedule
-                    </h2>
-                </div>
-                
-                <div className="space-y-3">
-                    {days.map(day => (
-                        <DayRow 
-                            key={day.id} 
-                            day={day} 
-                            settings={settings}
-                            onUpdate={handleUpdateDay}
-                            onReset={handleResetDay}
-                            suggestions={getSmartSuggestions(day, days, settings)}
-                        />
-                    ))}
-                </div>
-            </div>
-
-            {/* Right Sidebar: Charts & Instructions */}
-            <div className="space-y-6">
-                <WeekChart days={days} />
-
-                {/* Rules Card */}
-                <div className="bg-slate-900 text-slate-300 p-6 rounded-xl text-sm leading-relaxed">
-                    <div className="flex justify-between items-center mb-3">
-                        <h3 className="text-white font-bold text-base">Current Rules</h3>
-                    </div>
-                    
-                    <ul className="space-y-2">
-                         <li className="flex gap-2">
-                            <span className="text-blue-400 font-bold">•</span>
-                            <span>Target: <b className="text-white">47.5h/week</b></span>
-                        </li>
-                        <li className="flex gap-2">
-                            <span className="text-blue-400 font-bold">•</span>
-                            <span>Late: After <b className="text-red-300">
-                                {(() => {
-                                    const [h, m] = settings.standardInTime.split(':').map(Number);
-                                    const total = h * 60 + m + settings.lateBufferMinutes;
-                                    const h2 = Math.floor(total / 60);
-                                    const m2 = total % 60;
-                                    return `${h2.toString().padStart(2,'0')}:${m2.toString().padStart(2,'0')}`;
-                                })()}
-                            </b></span>
-                        </li>
-                        <li className="flex gap-2">
-                            <span className="text-blue-400 font-bold">•</span>
-                            <span>Max Out: {settings.enableMaxTime ? <b className="text-white">{settings.maxOutTime}</b> : <b className="text-emerald-400">None</b>}</span>
-                        </li>
-                    </ul>
-                </div>
-
-                {/* Dynamic Advice Box */}
-                 {stats.weeklyDeficit > 1 && stats.remainingWeekly > 0 && (
-                    <div className="bg-amber-50 border border-amber-200 p-4 rounded-xl">
-                        <h4 className="text-amber-800 font-bold text-sm mb-1 flex items-center gap-2">
-                            <AlertTriangle className="w-4 h-4" />
-                            Recover Deficit
-                        </h4>
-                        <p className="text-amber-700 text-xs">
-                            Consider applying a <span className="font-bold">Half-Day Leave</span> to a previous day if you cannot make up the hours.
-                        </p>
-                    </div>
-                )}
-            </div>
-        </div>
+      <main className="max-w-5xl mx-auto px-4 py-8">
+         {viewMode === 'weekly' ? (
+            <WeeklyDashboard settings={settings} />
+         ) : (
+            <QuickCalculator settings={settings} />
+         )}
       </main>
     </div>
   );

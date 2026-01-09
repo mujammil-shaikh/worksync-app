@@ -161,7 +161,7 @@ export const distributeDeficit = (days: DayLog[], settings: UserSettings): DayLo
 };
 
 // New Helper to calculate suggestion for a single target duration
-const calculateOutTime = (punchIn: string, targetHours: number, settings: UserSettings): SuggestionResult => {
+export const calculateOutTime = (punchIn: string, targetHours: number, settings: UserSettings): SuggestionResult => {
   const startMins = timeToMinutes(punchIn);
   const targetDurationMins = targetHours * 60;
   const suggestedOutMins = startMins + targetDurationMins;
