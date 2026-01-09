@@ -1,0 +1,5 @@
+{
+  "name": "WorkSync - Intelligent Hour Tracker",
+  "description": "A constraint-driven work hour tracking application that manages daily punch-outs, weekly balances, and deficit recovery based on strict corporate policies.",
+  "requestFramePermissions": []
+}
