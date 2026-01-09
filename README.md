@@ -1,20 +1,51 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
-</div>
+# WorkSync - Intelligent Hour Tracker
 
-# Run and deploy your AI Studio app
+A progressive web app (PWA) for tracking corporate work hours, managing deficits, and calculating daily punch-out times.
 
-This contains everything you need to run your app locally.
+## 🚀 How to Run Locally
 
-View your app in AI Studio: https://ai.studio/apps/drive/1WAXoND1Cttx1hMMRz7ym20HPS-Y7ZBge
+You need **Node.js** installed on your computer.
 
-## Run Locally
+1.  **Download the Code**: Save all these files into a folder named `worksync`.
+2.  **Open Terminal**: Navigate to that folder.
+3.  **Install Dependencies**:
+    ```bash
+    npm install
+    ```
+4.  **Start the App**:
+    ```bash
+    npm run dev
+    ```
+5.  **Open Browser**: Go to `http://localhost:3000`.
 
-**Prerequisites:**  Node.js
+---
 
+## ☁️ How to Host & Install (Free)
 
-1. Install dependencies:
-   `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
-   `npm run dev`
+To install this on your iPhone or Android, it needs to be hosted on the web securely.
+
+### Step 1: Push to GitHub
+1.  Create a new repository on [GitHub.com](https://github.com) (e.g., `worksync-app`).
+2.  In your local folder, run:
+    ```bash
+    git init
+    git add .
+    git commit -m "Initial commit"
+    git branch -M main
+    git remote add origin https://github.com/YOUR_USERNAME/worksync-app.git
+    git push -u origin main
+    ```
+
+### Step 2: Deploy to Vercel
+1.  Go to [Vercel.com](https://vercel.com) and Sign Up/Login.
+2.  Click **"Add New..."** -> **"Project"**.
+3.  Select **"Import"** next to your `worksync-app` repository.
+4.  Leave all settings as default (Framework Preset: Vite).
+5.  Click **Deploy**.
+
+### Step 3: Install on Device
+1.  Once deployed, Vercel gives you a URL (e.g., `https://worksync-app.vercel.app`).
+2.  **Android**: Open the link in Chrome. Tap the **"Install App"** button in the top right header, or tap the Chrome menu (⋮) -> "Install app".
+3.  **iOS (iPhone)**: Open the link in Safari. Tap the **Share Button** (box with arrow) -> Scroll down -> **"Add to Home Screen"**.
+
+Now it works exactly like a native app!

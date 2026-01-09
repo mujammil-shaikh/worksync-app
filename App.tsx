@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { format, startOfWeek, addDays, isSameDay } from 'date-fns';
-import { Briefcase, AlertTriangle, RefreshCw, Calendar, CheckCircle2, Download } from 'lucide-react';
+import { Briefcase, AlertTriangle, RefreshCw, Calendar, CheckCircle2, Download, Share, X } from 'lucide-react';
 
 import DayRow from './components/DayRow';
 import WeekChart from './components/WeekChart';
@@ -11,6 +11,7 @@ import { calculateDuration, calculateWeekStats, decimalToDuration, distributeDef
 function App() {
   const [currentDate] = useState(new Date());
   const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
+  const [showIosInstall, setShowIosInstall] = useState(false);
   
   // Initialize Week Data
   const [days, setDays] = useState<DayLog[]>(() => {
@@ -44,16 +45,25 @@ function App() {
     isOnTrack: false
   });
 
-  // Handle PWA Install Prompt
+  // Handle PWA Install Prompt & iOS Detection
   useEffect(() => {
+    // Android/Desktop Prompt
     const handler = (e: any) => {
-      // Prevent the mini-infobar from appearing on mobile
       e.preventDefault();
-      // Stash the event so it can be triggered later.
       setDeferredPrompt(e);
     };
-
     window.addEventListener('beforeinstallprompt', handler);
+
+    // iOS Detection
+    const isIos = /iPad|iPhone|iPod/.test(navigator.userAgent) && !(window as any).MSStream;
+    const isStandalone = window.matchMedia('(display-mode: standalone)').matches || (window.navigator as any).standalone;
+    
+    if (isIos && !isStandalone) {
+      // Show iOS instructions after a small delay
+      const timer = setTimeout(() => setShowIosInstall(true), 2000);
+      return () => clearTimeout(timer);
+    }
+
     return () => window.removeEventListener('beforeinstallprompt', handler);
   }, []);
 
@@ -121,7 +131,7 @@ function App() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 pb-20">
+    <div className="min-h-screen bg-slate-50 pb-20 relative">
       {/* Header */}
       <header className="bg-white border-b border-slate-200 sticky top-0 z-20">
         <div className="max-w-5xl mx-auto px-4 h-16 flex items-center justify-between">
@@ -138,7 +148,7 @@ function App() {
                   className="flex items-center gap-2 text-blue-600 bg-blue-50 hover:bg-blue-100 px-3 py-2 rounded-lg text-sm font-semibold transition-colors"
                >
                   <Download className="w-4 h-4" />
-                  <span className="hidden sm:inline">Install App</span>
+                  <span className="hidden sm:inline">Install</span>
                </button>
              )}
              
@@ -153,11 +163,37 @@ function App() {
                 className="flex items-center gap-2 bg-slate-900 hover:bg-slate-800 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors shadow-lg shadow-slate-200"
             >
                 <RefreshCw className="w-4 h-4" />
-                <span className="hidden sm:inline">Auto-Plan Remainder</span>
+                <span className="hidden sm:inline">Auto-Plan</span>
              </button>
           </div>
         </div>
       </header>
+
+      {/* iOS Install Instruction Banner */}
+      {showIosInstall && (
+        <div className="fixed bottom-4 left-4 right-4 z-50 animate-in slide-in-from-bottom-5">
+          <div className="bg-slate-900 text-white p-4 rounded-xl shadow-2xl flex items-start gap-3 relative">
+            <button 
+              onClick={() => setShowIosInstall(false)}
+              className="absolute top-2 right-2 p-1 text-slate-400 hover:text-white"
+            >
+              <X className="w-4 h-4" />
+            </button>
+            <div className="bg-slate-800 p-2 rounded-lg">
+              <Download className="w-6 h-6" />
+            </div>
+            <div>
+              <h4 className="font-bold text-sm mb-1">Install WorkSync</h4>
+              <p className="text-xs text-slate-300 leading-relaxed">
+                To install on iOS, tap <Share className="w-3 h-3 inline mx-1" /> <b>Share</b> and select <br/>
+                <span className="font-bold text-white bg-slate-700 px-1.5 py-0.5 rounded text-[10px] mt-1 inline-block">
+                   + Add to Home Screen
+                </span>
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
 
       <main className="max-w-5xl mx-auto px-4 py-8 space-y-8">
         
