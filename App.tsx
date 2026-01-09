@@ -1,18 +1,38 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { format, startOfWeek, addDays, isSameDay } from 'date-fns';
-import { Briefcase, AlertTriangle, RefreshCw, Calendar, CheckCircle2, Download, Share, X } from 'lucide-react';
+import { Briefcase, AlertTriangle, RefreshCw, Calendar, CheckCircle2, Download, Share, X, Settings, Save } from 'lucide-react';
 
 import DayRow from './components/DayRow';
 import WeekChart from './components/WeekChart';
-import { DayLog, WeekStats } from './types';
+import { DayLog, WeekStats, UserSettings } from './types';
 import { WEEK_DAYS, WEEKLY_TARGET_HOURS } from './constants';
 import { calculateDuration, calculateWeekStats, decimalToDuration, distributeDeficit, getSmartSuggestions } from './services/timeUtils';
+
+const DEFAULT_SETTINGS: UserSettings = {
+  standardInTime: "10:30",
+  maxOutTime: "20:31",
+  enableMaxTime: true,
+  lateBufferMinutes: 30
+};
 
 function App() {
   const [currentDate] = useState(new Date());
   const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
   const [showIosInstall, setShowIosInstall] = useState(false);
+  const [isStandalone, setIsStandalone] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
   
+  // Load settings from local storage or default
+  const [settings, setSettings] = useState<UserSettings>(() => {
+    const saved = localStorage.getItem('worksync_settings');
+    return saved ? JSON.parse(saved) : DEFAULT_SETTINGS;
+  });
+
+  // Save settings to local storage when changed
+  useEffect(() => {
+    localStorage.setItem('worksync_settings', JSON.stringify(settings));
+  }, [settings]);
+
   // Initialize Week Data
   const [days, setDays] = useState<DayLog[]>(() => {
     const monday = startOfWeek(currentDate, { weekStartsOn: 1 });
@@ -47,6 +67,10 @@ function App() {
 
   // Handle PWA Install Prompt & iOS Detection
   useEffect(() => {
+    // Check if running in standalone mode
+    const checkStandalone = window.matchMedia('(display-mode: standalone)').matches || (window.navigator as any).standalone;
+    setIsStandalone(checkStandalone);
+
     // Android/Desktop Prompt
     const handler = (e: any) => {
       e.preventDefault();
@@ -54,25 +78,20 @@ function App() {
     };
     window.addEventListener('beforeinstallprompt', handler);
 
-    // iOS Detection
-    const isIos = /iPad|iPhone|iPod/.test(navigator.userAgent) && !(window as any).MSStream;
-    const isStandalone = window.matchMedia('(display-mode: standalone)').matches || (window.navigator as any).standalone;
-    
-    if (isIos && !isStandalone) {
-      // Show iOS instructions after a small delay
-      const timer = setTimeout(() => setShowIosInstall(true), 2000);
-      return () => clearTimeout(timer);
-    }
-
     return () => window.removeEventListener('beforeinstallprompt', handler);
   }, []);
 
   const handleInstallClick = async () => {
-    if (!deferredPrompt) return;
-    deferredPrompt.prompt();
-    const { outcome } = await deferredPrompt.userChoice;
-    if (outcome === 'accepted') {
-      setDeferredPrompt(null);
+    // If we have the native prompt (Android/Desktop), use it
+    if (deferredPrompt) {
+      deferredPrompt.prompt();
+      const { outcome } = await deferredPrompt.userChoice;
+      if (outcome === 'accepted') {
+        setDeferredPrompt(null);
+      }
+    } else {
+      // Otherwise show the "How to" modal (iOS or unsupported browsers)
+      setShowIosInstall(true);
     }
   };
 
@@ -126,7 +145,7 @@ function App() {
 
   // Auto-Plan / Redistribute Deficit
   const handleAutoPlan = () => {
-    const updatedDays = distributeDeficit(days);
+    const updatedDays = distributeDeficit(days, settings);
     setDays(updatedDays);
   };
 
@@ -142,32 +161,126 @@ function App() {
             <h1 className="text-xl font-bold text-slate-800 tracking-tight">WorkSync</h1>
           </div>
           <div className="flex items-center gap-4">
-             {deferredPrompt && (
+             {!isStandalone && (
                <button 
                   onClick={handleInstallClick}
                   className="flex items-center gap-2 text-blue-600 bg-blue-50 hover:bg-blue-100 px-3 py-2 rounded-lg text-sm font-semibold transition-colors"
                >
                   <Download className="w-4 h-4" />
-                  <span className="hidden sm:inline">Install</span>
+                  <span>Install</span>
                </button>
              )}
              
-             <div className="hidden md:flex flex-col items-end">
-                <span className="text-xs text-slate-400 font-medium uppercase tracking-wider">Net Target</span>
-                <span className={`text-sm font-bold ${stats.isOnTrack ? 'text-emerald-600' : 'text-amber-600'}`}>
-                    {decimalToDuration(stats.requiredTotal)}
-                </span>
-             </div>
+             <button 
+                onClick={() => setShowSettings(true)}
+                className="p-2 text-slate-500 hover:bg-slate-100 rounded-full transition-colors"
+                title="Settings"
+             >
+                <Settings className="w-5 h-5" />
+             </button>
+
              <button 
                 onClick={handleAutoPlan}
-                className="flex items-center gap-2 bg-slate-900 hover:bg-slate-800 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors shadow-lg shadow-slate-200"
+                className="hidden md:flex items-center gap-2 bg-slate-900 hover:bg-slate-800 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors shadow-lg shadow-slate-200"
             >
                 <RefreshCw className="w-4 h-4" />
-                <span className="hidden sm:inline">Auto-Plan</span>
+                <span>Auto-Plan</span>
              </button>
           </div>
         </div>
       </header>
+
+      {/* Settings Modal */}
+      {showSettings && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm animate-in fade-in">
+           <div className="bg-white rounded-2xl shadow-xl w-full max-w-md overflow-hidden">
+              <div className="p-4 border-b border-slate-100 flex justify-between items-center bg-slate-50">
+                <h3 className="font-bold text-slate-800 flex items-center gap-2">
+                   <Settings className="w-5 h-5" />
+                   Preferences
+                </h3>
+                <button onClick={() => setShowSettings(false)} className="p-1 text-slate-400 hover:text-slate-600">
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+              
+              <div className="p-6 space-y-6">
+                 
+                 {/* Standard In Time */}
+                 <div>
+                    <label className="block text-sm font-semibold text-slate-700 mb-1">Standard In Time</label>
+                    <p className="text-xs text-slate-500 mb-2">Used to auto-fill punch-in and calculate late status.</p>
+                    <input 
+                      type="time" 
+                      value={settings.standardInTime}
+                      onChange={(e) => setSettings({...settings, standardInTime: e.target.value})}
+                      className="w-full p-2 bg-slate-800 text-white border border-slate-700 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+                      style={{ colorScheme: 'dark' }}
+                    />
+                 </div>
+
+                 {/* Late Threshold Display */}
+                 <div className="bg-orange-50 p-3 rounded-lg border border-orange-100">
+                    <div className="flex items-center gap-2 text-orange-800 text-sm font-medium">
+                       <AlertTriangle className="w-4 h-4" />
+                       <span>Late Threshold</span>
+                    </div>
+                    <p className="text-xs text-orange-700 mt-1">
+                       You will be marked late if you punch in after <b>{
+                         // Simple logic to show user standard + 30m without complex import
+                         (() => {
+                            const [h, m] = settings.standardInTime.split(':').map(Number);
+                            const total = h * 60 + m + settings.lateBufferMinutes;
+                            const h2 = Math.floor(total / 60);
+                            const m2 = total % 60;
+                            return `${h2.toString().padStart(2,'0')}:${m2.toString().padStart(2,'0')}`;
+                         })()
+                       }</b> (+{settings.lateBufferMinutes}m).
+                    </p>
+                 </div>
+
+                 {/* Max Out Time Toggle */}
+                 <div className="border-t border-slate-100 pt-4">
+                     <div className="flex items-center justify-between mb-4">
+                        <div>
+                           <label className="block text-sm font-semibold text-slate-700">Max Out Restriction</label>
+                           <p className="text-xs text-slate-500">Cap punch-out time automatically.</p>
+                        </div>
+                        <button 
+                           onClick={() => setSettings({...settings, enableMaxTime: !settings.enableMaxTime})}
+                           className={`w-12 h-6 rounded-full transition-colors relative ${settings.enableMaxTime ? 'bg-blue-600' : 'bg-slate-300'}`}
+                        >
+                           <div className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-all ${settings.enableMaxTime ? 'left-7' : 'left-1'}`} />
+                        </button>
+                     </div>
+
+                     {settings.enableMaxTime && (
+                        <div className="animate-in slide-in-from-top-2">
+                           <label className="block text-sm font-semibold text-slate-700 mb-1">Max Allowed Out Time</label>
+                           <input 
+                              type="time" 
+                              value={settings.maxOutTime}
+                              onChange={(e) => setSettings({...settings, maxOutTime: e.target.value})}
+                              className="w-full p-2 bg-slate-800 text-white border border-slate-700 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+                              style={{ colorScheme: 'dark' }}
+                           />
+                        </div>
+                     )}
+                 </div>
+              </div>
+              
+              <div className="p-4 bg-slate-50 border-t border-slate-100 flex justify-end">
+                 <button 
+                   onClick={() => setShowSettings(false)}
+                   className="bg-slate-900 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-slate-800 flex items-center gap-2"
+                 >
+                   <Save className="w-4 h-4" />
+                   Done
+                 </button>
+              </div>
+           </div>
+        </div>
+      )}
 
       {/* iOS Install Instruction Banner */}
       {showIosInstall && (
@@ -252,6 +365,17 @@ function App() {
             </div>
         </div>
 
+        {/* Mobile Auto Plan Button */}
+        <div className="md:hidden">
+             <button 
+                onClick={handleAutoPlan}
+                className="w-full flex items-center justify-center gap-2 bg-slate-900 hover:bg-slate-800 text-white px-4 py-3 rounded-xl text-sm font-medium transition-colors shadow-lg shadow-slate-200"
+            >
+                <RefreshCw className="w-4 h-4" />
+                <span>Auto-Plan Remainder</span>
+             </button>
+        </div>
+
         {/* Main Content Grid */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
             
@@ -269,9 +393,10 @@ function App() {
                         <DayRow 
                             key={day.id} 
                             day={day} 
+                            settings={settings}
                             onUpdate={handleUpdateDay}
                             onReset={handleResetDay}
-                            suggestions={getSmartSuggestions(day, days)}
+                            suggestions={getSmartSuggestions(day, days, settings)}
                         />
                     ))}
                 </div>
@@ -283,7 +408,10 @@ function App() {
 
                 {/* Rules Card */}
                 <div className="bg-slate-900 text-slate-300 p-6 rounded-xl text-sm leading-relaxed">
-                    <h3 className="text-white font-bold mb-3 text-base">Policy Rules</h3>
+                    <div className="flex justify-between items-center mb-3">
+                        <h3 className="text-white font-bold text-base">Current Rules</h3>
+                    </div>
+                    
                     <ul className="space-y-2">
                          <li className="flex gap-2">
                             <span className="text-blue-400 font-bold">•</span>
@@ -291,15 +419,19 @@ function App() {
                         </li>
                         <li className="flex gap-2">
                             <span className="text-blue-400 font-bold">•</span>
-                            <span>Half-Day Leave: <b className="text-purple-300">-4.75h</b> credit</span>
+                            <span>Late: After <b className="text-red-300">
+                                {(() => {
+                                    const [h, m] = settings.standardInTime.split(':').map(Number);
+                                    const total = h * 60 + m + settings.lateBufferMinutes;
+                                    const h2 = Math.floor(total / 60);
+                                    const m2 = total % 60;
+                                    return `${h2.toString().padStart(2,'0')}:${m2.toString().padStart(2,'0')}`;
+                                })()}
+                            </b></span>
                         </li>
                         <li className="flex gap-2">
                             <span className="text-blue-400 font-bold">•</span>
-                            <span>Max Out: <b className="text-white">8:31 PM</b> (Strict)</span>
-                        </li>
-                        <li className="flex gap-2">
-                            <span className="text-blue-400 font-bold">•</span>
-                            <span>Late Threshold: <b className="text-red-300">11:00 AM</b></span>
+                            <span>Max Out: {settings.enableMaxTime ? <b className="text-white">{settings.maxOutTime}</b> : <b className="text-emerald-400">None</b>}</span>
                         </li>
                     </ul>
                 </div>
