@@ -1,10 +1,9 @@
-import { DayLog, WeekStats, LeaveType, DaySuggestions, SuggestionResult } from '../types';
+import { DayLog, WeekStats, LeaveType, DaySuggestions, SuggestionResult, UserSettings } from '../types';
 import { 
   DAILY_TARGET_HOURS, 
   WEEKLY_TARGET_HOURS, 
   HALF_DAY_DEDUCTION, 
-  FULL_DAY_DEDUCTION, 
-  MAX_PUNCH_OUT_MINUTES 
+  FULL_DAY_DEDUCTION 
 } from '../constants';
 
 // Convert HH:MM string to minutes from midnight
@@ -16,10 +15,18 @@ export const timeToMinutes = (timeStr: string): number => {
 
 // Convert minutes from midnight to HH:MM string
 export const minutesToTime = (totalMinutes: number): string => {
-  if (totalMinutes < 0) return "00:00";
-  const hours = Math.floor(totalMinutes / 60);
-  const minutes = Math.floor(totalMinutes % 60);
+  let mins = Math.max(0, totalMinutes);
+  if (mins >= 24 * 60) mins = 23 * 60 + 59; // Cap at 23:59
+  const hours = Math.floor(mins / 60);
+  const minutes = Math.floor(mins % 60);
   return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}`;
+};
+
+// Add minutes to a time string
+export const addMinutesToTime = (timeStr: string, minutesToAdd: number): string => {
+  if (!timeStr) return "00:00";
+  const startMins = timeToMinutes(timeStr);
+  return minutesToTime(startMins + minutesToAdd);
 };
 
 // Convert decimal hours to pretty string "9h 30m"
@@ -102,14 +109,10 @@ export const calculateWeekStats = (days: DayLog[]): WeekStats => {
   };
 };
 
-export const distributeDeficit = (days: DayLog[]): DayLog[] => {
+export const distributeDeficit = (days: DayLog[], settings: UserSettings): DayLog[] => {
   const newDays = [...days];
   const stats = calculateWeekStats(newDays); 
   
-  // Logic to determine if a day is "Locked" (cannot be changed by auto-planner)
-  // - PAST days are locked.
-  // - PRESENT days with a punchOut are locked (already done).
-  // - FULL Leave days are locked (no work needed).
   const isLocked = (day: DayLog) => {
     if (day.leaveType === 'FULL') return true;
     if (day.status === 'PAST') return true;
@@ -131,15 +134,19 @@ export const distributeDeficit = (days: DayLog[]): DayLog[] => {
   // Distribute neededTotal across adjustable days
   const hoursPerDay = neededTotal / adjustableIndices.length;
 
+  const maxOutMinutes = settings.enableMaxTime 
+    ? timeToMinutes(settings.maxOutTime) 
+    : 24 * 60 - 1; // 23:59 if no restriction
+
   adjustableIndices.forEach(index => {
     const day = newDays[index];
-    const startStr = day.punchIn || "10:30"; // Default start if missing
+    const startStr = day.punchIn || settings.standardInTime; // Use settings default
     const startMins = timeToMinutes(startStr);
     const durationMinutes = hoursPerDay * 60;
     const endMins = startMins + durationMinutes;
 
-    // Apply Hard Constraint (8:31 PM)
-    const cappedEndMins = Math.min(endMins, MAX_PUNCH_OUT_MINUTES);
+    // Apply Hard Constraint based on settings
+    const cappedEndMins = Math.min(endMins, maxOutMinutes);
     const endStr = minutesToTime(cappedEndMins);
 
     newDays[index] = {
@@ -154,31 +161,61 @@ export const distributeDeficit = (days: DayLog[]): DayLog[] => {
 };
 
 // New Helper to calculate suggestion for a single target duration
-const calculateOutTime = (punchIn: string, targetHours: number): SuggestionResult => {
+const calculateOutTime = (punchIn: string, targetHours: number, settings: UserSettings): SuggestionResult => {
   const startMins = timeToMinutes(punchIn);
   const targetDurationMins = targetHours * 60;
   const suggestedOutMins = startMins + targetDurationMins;
 
-  if (suggestedOutMins > MAX_PUNCH_OUT_MINUTES) {
-    const maxPossibleMins = MAX_PUNCH_OUT_MINUTES - startMins;
-    const deficitHours = (targetDurationMins - maxPossibleMins) / 60;
+  // Determine Limit
+  const maxLimitMins = settings.enableMaxTime 
+    ? timeToMinutes(settings.maxOutTime) 
+    : 24 * 60 - 1;
+
+  // Check if target fits within limits
+  if (suggestedOutMins <= maxLimitMins) {
     return {
-      time: minutesToTime(MAX_PUNCH_OUT_MINUTES),
-      status: 'impossible',
-      msg: `Cap reached. Deficit: ${decimalToDuration(deficitHours)}`
+      time: minutesToTime(suggestedOutMins),
+      status: 'ok',
+      msg: 'Target Met'
     };
   }
 
+  // --- CONSTRAINT HIT: CALCULATE LEAVE SUGGESTION ---
+  
+  // How much can we actually work today?
+  const maxPossibleMins = Math.max(0, maxLimitMins - startMins);
+  
+  // Deficit in hours
+  const deficitHours = (targetDurationMins - maxPossibleMins) / 60;
+  
+  // Calculate Half-Day credits needed (4.75h each)
+  const halfDaysNeeded = Math.ceil(deficitHours / HALF_DAY_DEDUCTION);
+  
+  if (halfDaysNeeded > 0) {
+     // Recalculate punch out time assuming user takes those leaves (reduces target)
+     const creditHours = halfDaysNeeded * HALF_DAY_DEDUCTION;
+     const newTargetHours = Math.max(0, targetHours - creditHours);
+     const newTargetMins = newTargetHours * 60;
+     const newOutMins = startMins + newTargetMins;
+     
+     return {
+       time: minutesToTime(newOutMins),
+       status: 'suggestion',
+       msg: `Add ${halfDaysNeeded} Half-Day${halfDaysNeeded > 1 ? 's' : ''}`
+     };
+  }
+
   return {
-    time: minutesToTime(suggestedOutMins),
-    status: 'ok',
-    msg: 'Target Met'
+    time: minutesToTime(maxLimitMins),
+    status: 'impossible',
+    msg: `Cap reached. Deficit: ${decimalToDuration(deficitHours)}`
   };
 };
 
 export const getSmartSuggestions = (
   day: DayLog, 
-  allDays: DayLog[]
+  allDays: DayLog[],
+  settings: UserSettings
 ): DaySuggestions => {
   const emptyResult: SuggestionResult = { time: '', status: 'none', msg: '' };
   
@@ -187,24 +224,15 @@ export const getSmartSuggestions = (
   }
 
   // 1. Calculate Standard (STD)
-  // Just the daily expectation (9.5 or 4.75)
   const standardTarget = getDailyExpectation(day.leaveType);
-  const standardSuggestion = calculateOutTime(day.punchIn, standardTarget);
+  const standardSuggestion = calculateOutTime(day.punchIn, standardTarget, settings);
 
   // 2. Calculate Adjusted (ADJ)
-  // Distribute remaining weekly work across remaining days
   const stats = calculateWeekStats(allDays);
-  
-  // Hours done by others
-  // We need to be careful not to double count the current day if it's somehow in stats?
-  // calculateWeekStats uses grossHours. Current day has 0 grossHours if no punchOut.
-  // So stats.totalWorked excludes current day's potential work.
-  // HOWEVER, we must exclude other days that are locked? No, we take stats.requiredTotal - (everyone else's work).
   
   const otherDaysWorked = allDays.reduce((acc, d) => d.id !== day.id ? acc + d.grossHours : acc, 0);
   const remainingNeededGlobal = Math.max(0, stats.requiredTotal - otherDaysWorked);
 
-  // Remaining active days including this one
   const availableDaysCount = allDays.filter(d => 
     d.leaveType !== 'FULL' && 
     !d.punchOut && 
@@ -212,7 +240,7 @@ export const getSmartSuggestions = (
   ).length;
 
   const adjustedTarget = remainingNeededGlobal / Math.max(1, availableDaysCount);
-  const adjustedSuggestion = calculateOutTime(day.punchIn, adjustedTarget);
+  const adjustedSuggestion = calculateOutTime(day.punchIn, adjustedTarget, settings);
 
   return {
     standard: standardSuggestion,

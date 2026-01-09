@@ -1,11 +1,11 @@
 import React, { useMemo } from 'react';
 import { Clock, AlertCircle, CheckCircle, ChevronDown, RotateCcw } from 'lucide-react';
-import { DayLog, LeaveType, DaySuggestions, SuggestionResult } from '../types';
-import { LATE_THRESHOLD, MAX_PUNCH_OUT_TIME, DAILY_TARGET_HOURS } from '../constants';
-import { decimalToDuration, getDailyExpectation } from '../services/timeUtils';
+import { DayLog, LeaveType, DaySuggestions, SuggestionResult, UserSettings } from '../types';
+import { decimalToDuration, getDailyExpectation, addMinutesToTime } from '../services/timeUtils';
 
 interface Props {
   day: DayLog;
+  settings: UserSettings;
   onUpdate: (id: string, field: keyof DayLog, value: any) => void;
   onReset: (id: string) => void;
   suggestions: DaySuggestions;
@@ -20,13 +20,22 @@ const SuggestionPill: React.FC<{
   if (data.status === 'none') return null;
 
   const isImpossible = data.status === 'impossible';
+  const isSuggestion = data.status === 'suggestion';
   
   // Color styling
-  const baseClasses = "flex items-center gap-1.5 px-2 py-1 rounded text-[10px] font-bold uppercase tracking-wider cursor-pointer transition-all border";
+  const baseClasses = "flex items-center gap-1.5 px-2 py-1 rounded text-[10px] font-bold uppercase tracking-wider cursor-pointer transition-all border whitespace-nowrap";
   
   let colorClasses = "";
+  let displayMsg = "";
+
   if (isImpossible) {
     colorClasses = "bg-red-50 border-red-200 text-red-600 hover:bg-red-100";
+  } else if (isSuggestion) {
+    // Amber for "Need Leave" suggestion
+    colorClasses = "bg-amber-50 border-amber-200 text-amber-700 hover:bg-amber-100 ring-1 ring-amber-100";
+    // Extract number from message "Add 1 Half-Day" -> "1 HF"
+    const count = data.msg.match(/\d+/)?.[0] || '?';
+    displayMsg = `+${count}HF`;
   } else if (variant === 'std') {
     colorClasses = "bg-slate-100 border-slate-200 text-slate-600 hover:bg-slate-200";
   } else {
@@ -35,18 +44,20 @@ const SuggestionPill: React.FC<{
 
   return (
     <button onClick={onClick} className={`${baseClasses} ${colorClasses}`} title={data.msg}>
-      <span>{label}</span>
+      <span>{label} {displayMsg && <span className="text-[9px] bg-white/50 px-1 rounded ml-0.5">{displayMsg}</span>}</span>
       <span className="font-mono text-xs">{data.time}</span>
     </button>
   );
 };
 
-const DayRow: React.FC<Props> = ({ day, onUpdate, onReset, suggestions }) => {
+const DayRow: React.FC<Props> = ({ day, settings, onUpdate, onReset, suggestions }) => {
   
   const isLate = useMemo(() => {
     if (!day.punchIn) return false;
-    return day.punchIn > LATE_THRESHOLD;
-  }, [day.punchIn]);
+    // Late threshold is user's set Standard In Time + Buffer (30 mins)
+    const lateThreshold = addMinutesToTime(settings.standardInTime, settings.lateBufferMinutes);
+    return day.punchIn > lateThreshold;
+  }, [day.punchIn, settings.standardInTime, settings.lateBufferMinutes]);
 
   const dailyTarget = getDailyExpectation(day.leaveType);
   const isMet = day.grossHours >= dailyTarget && dailyTarget > 0;
@@ -62,6 +73,9 @@ const DayRow: React.FC<Props> = ({ day, onUpdate, onReset, suggestions }) => {
   const isDisabled = day.leaveType === 'FULL';
   const showSuggestions = !isDisabled && !day.punchOut && day.punchIn && suggestions.standard.status !== 'none';
   const hasData = day.punchIn || day.punchOut;
+
+  // If restriction is enabled, use maxOutTime, otherwise 23:59
+  const maxInputTime = settings.enableMaxTime ? settings.maxOutTime : "23:59";
 
   return (
     <div className={`relative flex flex-col md:flex-row gap-4 p-4 rounded-xl border ${progressColor} transition-all duration-200`}>
@@ -121,7 +135,7 @@ const DayRow: React.FC<Props> = ({ day, onUpdate, onReset, suggestions }) => {
               type="time" 
               value={day.punchOut}
               disabled={isDisabled}
-              max={MAX_PUNCH_OUT_TIME}
+              max={maxInputTime}
               onChange={(e) => onUpdate(day.id, 'punchOut', e.target.value)}
               className={`w-full p-2 text-sm bg-white border rounded-lg focus:ring-2 focus:ring-blue-200 outline-none font-mono border-slate-200 disabled:bg-slate-50 disabled:text-slate-400`}
             />
@@ -132,7 +146,7 @@ const DayRow: React.FC<Props> = ({ day, onUpdate, onReset, suggestions }) => {
            
            {/* Suggestions Container */}
            {showSuggestions && (
-             <div className="absolute top-full left-0 mt-2 flex gap-2 z-10 animate-in fade-in slide-in-from-top-1">
+             <div className="absolute top-full left-0 mt-2 flex flex-wrap gap-2 z-10 animate-in fade-in slide-in-from-top-1 w-[200px] md:w-auto">
                <SuggestionPill 
                  label="STD" 
                  data={suggestions.standard} 
