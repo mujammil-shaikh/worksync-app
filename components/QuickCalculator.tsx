@@ -1,8 +1,8 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { Calculator, Clock, AlertTriangle, ArrowRight, RotateCcw, Check, Calendar } from 'lucide-react';
+import { Calculator, Clock, AlertTriangle, ArrowRight, RotateCcw, Check, Calendar, Info, ShieldCheck } from 'lucide-react';
 import { UserSettings, SuggestionResult, LeaveType } from '../types';
-import { calculateOutTime, decimalToDuration } from '../services/timeUtils';
-import { WEEKLY_TARGET_HOURS, DAILY_TARGET_HOURS, HALF_DAY_DEDUCTION, FULL_DAY_DEDUCTION } from '../constants';
+import { calculateOutTimeFromMinutes, minutesToDuration } from '../services/timeUtils';
+import { WEEKLY_TARGET_HOURS, DAILY_TARGET_HOURS, HALF_DAY_DEDUCTION, FULL_DAY_DEDUCTION, SAFETY_BUFFER_MINUTES } from '../constants';
 
 interface Props {
   settings: UserSettings;
@@ -77,10 +77,10 @@ const QuickCalculator: React.FC<Props> = ({ settings }) => {
     setCurrentDayIdx(0);
   };
 
-  // --- CALCULATION ENGINE ---
+  // --- CALCULATION ENGINE (MINUTE PRECISION) ---
   const calculation = useMemo(() => {
-    let totalWorked = 0;
-    let totalDeduction = 0;
+    let totalWorkedMinutes = 0;
+    let totalDeductionMinutes = 0;
     let futureDaysCount = 0;
 
     WEEK_DAYS.forEach((day, idx) => {
@@ -90,14 +90,15 @@ const QuickCalculator: React.FC<Props> = ({ settings }) => {
       const isFuture = idx > currentDayIdx;
 
       // 1. Calculate Deductions (Reduces Target)
-      if (input.leave === 'FULL') totalDeduction += FULL_DAY_DEDUCTION;
-      if (input.leave === 'HALF') totalDeduction += HALF_DAY_DEDUCTION;
+      // Use exact minutes: 9.5 * 60 = 570, 4.75 * 60 = 285
+      if (input.leave === 'FULL') totalDeductionMinutes += (FULL_DAY_DEDUCTION * 60);
+      if (input.leave === 'HALF') totalDeductionMinutes += (HALF_DAY_DEDUCTION * 60);
 
       // 2. Calculate Worked Hours (Only relevant for Past)
       if (isPast && input.leave !== 'FULL') {
         const h = parseInt(input.hours || '0', 10);
         const m = parseInt(input.minutes || '0', 10);
-        totalWorked += h + (m / 60);
+        totalWorkedMinutes += (h * 60) + m;
       }
 
       // 3. Count Available Days to Spread (Today + Future)
@@ -107,18 +108,22 @@ const QuickCalculator: React.FC<Props> = ({ settings }) => {
       }
     });
 
-    const adjustedWeeklyTarget = Math.max(0, WEEKLY_TARGET_HOURS - totalDeduction);
-    const remainingNeeded = Math.max(0, adjustedWeeklyTarget - totalWorked);
+    const weeklyTargetMinutes = WEEKLY_TARGET_HOURS * 60; // 2850
+    const adjustedWeeklyTargetMinutes = Math.max(0, weeklyTargetMinutes - totalDeductionMinutes);
+    const remainingNeededMinutes = Math.max(0, adjustedWeeklyTargetMinutes - totalWorkedMinutes);
     
     // Distribute remaining needed across available future days (including today)
-    const dailyTarget = remainingNeeded / Math.max(1, futureDaysCount);
+    // Use Math.ceil to ensure we don't under-calculate. 
+    // E.g., if 100 mins over 3 days => 33.33 => suggest 34 mins today to stay ahead.
+    const dailyTargetMinutes = Math.ceil(remainingNeededMinutes / Math.max(1, futureDaysCount));
 
     return {
-      totalWorked,
-      totalDeduction,
-      remainingNeeded,
+      totalWorkedMinutes,
+      totalDeductionMinutes,
+      remainingNeededMinutes,
       futureDaysCount,
-      dailyTarget
+      dailyTargetMinutes,
+      adjustedWeeklyTargetMinutes
     };
   }, [dayInputs, currentDayIdx]);
 
@@ -129,8 +134,8 @@ const QuickCalculator: React.FC<Props> = ({ settings }) => {
     }
     if (!todayPunchIn) return { time: '--:--', status: 'none', msg: '' };
     
-    return calculateOutTime(todayPunchIn, calculation.dailyTarget, settings);
-  }, [todayPunchIn, calculation.dailyTarget, settings, currentDayIdx, dayInputs]);
+    return calculateOutTimeFromMinutes(todayPunchIn, calculation.dailyTargetMinutes, settings);
+  }, [todayPunchIn, calculation.dailyTargetMinutes, settings, currentDayIdx, dayInputs]);
 
   const isImpossible = result.status === 'impossible';
   const isSuggestion = result.status === 'suggestion';
@@ -276,6 +281,18 @@ const QuickCalculator: React.FC<Props> = ({ settings }) => {
                 );
             })}
         </div>
+        
+        {/* Calc Breakdown Stats */}
+        <div className="bg-slate-50 border-t border-slate-200 p-4 grid grid-cols-2 gap-4 text-xs text-slate-500">
+           <div>
+               <span className="block font-bold text-slate-700 uppercase mb-0.5">Total Worked</span>
+               <span className="font-mono">{minutesToDuration(calculation.totalWorkedMinutes)}</span>
+           </div>
+           <div>
+               <span className="block font-bold text-slate-700 uppercase mb-0.5">Left to Work</span>
+               <span className="font-mono">{minutesToDuration(calculation.remainingNeededMinutes)}</span>
+           </div>
+        </div>
       </div>
 
       {/* Result Card */}
@@ -304,13 +321,13 @@ const QuickCalculator: React.FC<Props> = ({ settings }) => {
 
          <div className={`mt-4 pt-4 border-t ${isImpossible ? 'border-red-200' : isSuggestion ? 'border-amber-200' : 'border-indigo-500/30'}`}>
              <div className="flex items-center gap-3">
-                 {isImpossible ? <AlertTriangle className="w-5 h-5 text-red-500" /> : isSuggestion ? <AlertTriangle className="w-5 h-5 text-amber-600" /> : <ArrowRight className="w-5 h-5 text-indigo-300" />}
+                 {isImpossible ? <AlertTriangle className="w-5 h-5 text-red-500" /> : isSuggestion ? <AlertTriangle className="w-5 h-5 text-amber-600" /> : <ShieldCheck className="w-5 h-5 text-indigo-300" />}
                  <div>
                      <p className={`text-sm font-bold ${isImpossible ? 'text-red-700' : isSuggestion ? 'text-amber-800' : 'text-white'}`}>
-                        {result.msg}
+                        {result.msg} {result.status === 'ok' && `(+${SAFETY_BUFFER_MINUTES}m safe buffer)`}
                      </p>
                      <p className={`text-xs mt-0.5 ${isImpossible ? 'text-red-500' : isSuggestion ? 'text-amber-700' : 'text-indigo-200'}`}>
-                        Remaining: {decimalToDuration(calculation.remainingNeeded)} total • {decimalToDuration(calculation.dailyTarget)} / day
+                        Target for Today: {minutesToDuration(calculation.dailyTargetMinutes)}
                      </p>
                  </div>
              </div>

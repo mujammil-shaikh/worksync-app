@@ -1,12 +1,14 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { format, startOfWeek, addDays, isSameDay } from 'date-fns';
-import { Calendar, AlertTriangle, RefreshCw, CheckCircle2 } from 'lucide-react';
+import { Calendar, AlertTriangle, RefreshCw, CheckCircle2, ClipboardCopy } from 'lucide-react';
 
 import DayRow from './DayRow';
 import WeekChart from './WeekChart';
+import ImportModal from './ImportModal';
 import { DayLog, WeekStats, UserSettings } from '../types';
 import { WEEK_DAYS, WEEKLY_TARGET_HOURS } from '../constants';
 import { calculateDuration, calculateWeekStats, decimalToDuration, distributeDeficit, getSmartSuggestions } from '../services/timeUtils';
+import { parseKekaText } from '../services/kekaParser';
 
 interface Props {
   settings: UserSettings;
@@ -14,6 +16,7 @@ interface Props {
 
 const WeeklyDashboard: React.FC<Props> = ({ settings }) => {
   const [currentDate] = useState(new Date());
+  const [showImport, setShowImport] = useState(false);
 
   // Initialize Week Data
   const [days, setDays] = useState<DayLog[]>(() => {
@@ -52,6 +55,33 @@ const WeeklyDashboard: React.FC<Props> = ({ settings }) => {
     projectedTotal: 0,
     isOnTrack: false
   });
+
+  // --- AUTO IMPORT FROM BOOKMARKLET ---
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const importData = params.get('keka_import');
+    
+    if (importData) {
+      try {
+        const decodedText = decodeURIComponent(importData);
+        // We use the setter function to access the most current state of 'days' 
+        // effectively merging new data into the existing structure
+        setDays(currentDays => {
+            const updated = parseKekaText(decodedText, currentDays);
+            // Optionally save immediately or let the other useEffect handle it
+            return updated;
+        });
+
+        // Clear the URL so we don't re-import on refresh
+        window.history.replaceState({}, '', window.location.pathname);
+        
+        // Could trigger a toast here if we had one
+        console.log("Auto-imported Keka data successfully");
+      } catch (e) {
+        console.error("Failed to process auto-import", e);
+      }
+    }
+  }, []);
 
   // Persist days when changed
   useEffect(() => {
@@ -112,8 +142,20 @@ const WeeklyDashboard: React.FC<Props> = ({ settings }) => {
     setDays(updatedDays);
   };
 
+  const handleImport = (updatedDays: DayLog[]) => {
+    setDays(updatedDays);
+  };
+
   return (
     <div className="space-y-8 animate-in fade-in">
+        {showImport && (
+            <ImportModal 
+                currentDays={days} 
+                onImport={handleImport} 
+                onClose={() => setShowImport(false)} 
+            />
+        )}
+
         {/* Top Stats Cards */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
             <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100 flex flex-col justify-between">
@@ -170,10 +212,17 @@ const WeeklyDashboard: React.FC<Props> = ({ settings }) => {
         </div>
 
         {/* Mobile Auto Plan Button */}
-        <div className="md:hidden">
+        <div className="md:hidden flex gap-2">
+             <button 
+                onClick={() => setShowImport(true)}
+                className="flex-1 flex items-center justify-center gap-2 bg-indigo-50 text-indigo-700 border border-indigo-200 hover:bg-indigo-100 px-4 py-3 rounded-xl text-sm font-bold transition-colors"
+            >
+                <ClipboardCopy className="w-4 h-4" />
+                <span>Import</span>
+             </button>
              <button 
                 onClick={handleAutoPlan}
-                className="w-full flex items-center justify-center gap-2 bg-slate-900 hover:bg-slate-800 text-white px-4 py-3 rounded-xl text-sm font-medium transition-colors shadow-lg shadow-slate-200"
+                className="flex-[2] flex items-center justify-center gap-2 bg-slate-900 hover:bg-slate-800 text-white px-4 py-3 rounded-xl text-sm font-medium transition-colors shadow-lg shadow-slate-200"
             >
                 <RefreshCw className="w-4 h-4" />
                 <span>Auto-Plan Remainder</span>
@@ -191,13 +240,23 @@ const WeeklyDashboard: React.FC<Props> = ({ settings }) => {
                         Weekly Schedule
                     </h2>
                     
-                    <button 
-                        onClick={handleAutoPlan}
-                        className="hidden md:flex items-center gap-2 text-slate-500 hover:text-blue-600 px-3 py-1 rounded-lg text-xs font-medium transition-colors border border-slate-200 hover:border-blue-200 hover:bg-blue-50"
-                    >
-                        <RefreshCw className="w-3 h-3" />
-                        <span>Auto-Plan</span>
-                    </button>
+                    <div className="hidden md:flex gap-2">
+                        <button 
+                            onClick={() => setShowImport(true)}
+                            className="flex items-center gap-2 text-indigo-600 bg-indigo-50 hover:bg-indigo-100 border border-indigo-100 px-3 py-1 rounded-lg text-xs font-bold transition-colors"
+                        >
+                            <ClipboardCopy className="w-3 h-3" />
+                            <span>Import from Keka</span>
+                        </button>
+
+                        <button 
+                            onClick={handleAutoPlan}
+                            className="flex items-center gap-2 text-slate-500 hover:text-blue-600 px-3 py-1 rounded-lg text-xs font-medium transition-colors border border-slate-200 hover:border-blue-200 hover:bg-blue-50"
+                        >
+                            <RefreshCw className="w-3 h-3" />
+                            <span>Auto-Plan</span>
+                        </button>
+                    </div>
                 </div>
                 
                 <div className="space-y-3">

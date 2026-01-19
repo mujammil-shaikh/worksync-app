@@ -3,7 +3,8 @@ import {
   DAILY_TARGET_HOURS, 
   WEEKLY_TARGET_HOURS, 
   HALF_DAY_DEDUCTION, 
-  FULL_DAY_DEDUCTION 
+  FULL_DAY_DEDUCTION,
+  SAFETY_BUFFER_MINUTES
 } from '../constants';
 
 // Convert HH:MM string to minutes from midnight
@@ -15,7 +16,7 @@ export const timeToMinutes = (timeStr: string): number => {
 
 // Convert minutes from midnight to HH:MM string
 export const minutesToTime = (totalMinutes: number): string => {
-  let mins = Math.max(0, totalMinutes);
+  let mins = Math.max(0, Math.round(totalMinutes)); // Round to nearest integer to avoid float errors
   if (mins >= 24 * 60) mins = 23 * 60 + 59; // Cap at 23:59
   const hours = Math.floor(mins / 60);
   const minutes = Math.floor(mins % 60);
@@ -38,13 +39,22 @@ export const decimalToDuration = (decimalHours: number): string => {
   return `${isNegative ? '-' : ''}${h}h ${m}m`;
 };
 
+// Convert minutes to pretty string "9h 30m"
+export const minutesToDuration = (totalMinutes: number): string => {
+  const isNegative = totalMinutes < 0;
+  const absMins = Math.abs(totalMinutes);
+  const h = Math.floor(absMins / 60);
+  const m = Math.round(absMins % 60);
+  return `${isNegative ? '-' : ''}${h}h ${m}m`;
+};
+
 // Calculate duration between two time strings in decimal hours
 export const calculateDuration = (start: string, end: string): number => {
   if (!start || !end) return 0;
   const startMins = timeToMinutes(start);
   const endMins = timeToMinutes(end);
   const diff = endMins - startMins;
-  return diff > 0 ? Number((diff / 60).toFixed(2)) : 0;
+  return diff > 0 ? Number((diff / 60).toFixed(4)) : 0; // Higher precision
 };
 
 export const getDailyExpectation = (leaveType: LeaveType): number => {
@@ -160,11 +170,17 @@ export const distributeDeficit = (days: DayLog[], settings: UserSettings): DayLo
   return newDays;
 };
 
-// New Helper to calculate suggestion for a single target duration
-export const calculateOutTime = (punchIn: string, targetHours: number, settings: UserSettings): SuggestionResult => {
+// Helper to calculate suggestion for a single target duration (in Minutes for precision)
+export const calculateOutTimeFromMinutes = (punchIn: string, targetMinutes: number, settings: UserSettings): SuggestionResult => {
   const startMins = timeToMinutes(punchIn);
-  const targetDurationMins = targetHours * 60;
-  const suggestedOutMins = startMins + targetDurationMins;
+  
+  // Round up to nearest minute and ADD SAFETY BUFFER (2 mins) to account for seconds drift.
+  // Example: Needed 8h 27m. Sug: 18:49. Real In: 10:22:50. Real Out need: 18:49:50.
+  // If user leaves at 18:49:00, they miss by 50s.
+  // Buffer of 2m makes suggestion 18:51. Safe.
+  const bufferedTargetMinutes = Math.ceil(targetMinutes) + (targetMinutes > 0 ? SAFETY_BUFFER_MINUTES : 0);
+  
+  const suggestedOutMins = startMins + bufferedTargetMinutes;
 
   // Determine Limit
   const maxLimitMins = settings.enableMaxTime 
@@ -185,18 +201,18 @@ export const calculateOutTime = (punchIn: string, targetHours: number, settings:
   // How much can we actually work today?
   const maxPossibleMins = Math.max(0, maxLimitMins - startMins);
   
-  // Deficit in hours
-  const deficitHours = (targetDurationMins - maxPossibleMins) / 60;
+  // Deficit in minutes (including buffer desire)
+  const deficitMinutes = bufferedTargetMinutes - maxPossibleMins;
   
-  // Calculate Half-Day credits needed (4.75h each)
-  const halfDaysNeeded = Math.ceil(deficitHours / HALF_DAY_DEDUCTION);
+  // Calculate Half-Day credits needed (285 mins each)
+  const halfDayMinutes = HALF_DAY_DEDUCTION * 60; // 4.75 * 60 = 285
+  const halfDaysNeeded = Math.ceil(deficitMinutes / halfDayMinutes);
   
   if (halfDaysNeeded > 0) {
      // Recalculate punch out time assuming user takes those leaves (reduces target)
-     const creditHours = halfDaysNeeded * HALF_DAY_DEDUCTION;
-     const newTargetHours = Math.max(0, targetHours - creditHours);
-     const newTargetMins = newTargetHours * 60;
-     const newOutMins = startMins + newTargetMins;
+     const creditMinutes = halfDaysNeeded * halfDayMinutes;
+     const newTargetMinutes = Math.max(0, bufferedTargetMinutes - creditMinutes);
+     const newOutMins = startMins + newTargetMinutes;
      
      return {
        time: minutesToTime(newOutMins),
@@ -208,8 +224,12 @@ export const calculateOutTime = (punchIn: string, targetHours: number, settings:
   return {
     time: minutesToTime(maxLimitMins),
     status: 'impossible',
-    msg: `Cap reached. Deficit: ${decimalToDuration(deficitHours)}`
+    msg: `Cap reached. Deficit: ${minutesToDuration(deficitMinutes)}`
   };
+};
+
+export const calculateOutTime = (punchIn: string, targetHours: number, settings: UserSettings): SuggestionResult => {
+    return calculateOutTimeFromMinutes(punchIn, targetHours * 60, settings);
 };
 
 export const getSmartSuggestions = (
