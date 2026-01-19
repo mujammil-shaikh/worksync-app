@@ -17,6 +17,7 @@ interface Props {
 const WeeklyDashboard: React.FC<Props> = ({ settings }) => {
   const [currentDate] = useState(new Date());
   const [showImport, setShowImport] = useState(false);
+  const [toastMessage, setToastMessage] = useState('');
 
   // Initialize Week Data
   const [days, setDays] = useState<DayLog[]>(() => {
@@ -65,23 +66,20 @@ const WeeklyDashboard: React.FC<Props> = ({ settings }) => {
       try {
         const decodedText = decodeURIComponent(importData);
         // We use the setter function to access the most current state of 'days' 
-        // effectively merging new data into the existing structure
         setDays(currentDays => {
-            const updated = parseKekaText(decodedText, currentDays);
-            // Optionally save immediately or let the other useEffect handle it
+            const updated = parseKekaText(decodedText, currentDays, settings);
             return updated;
         });
 
         // Clear the URL so we don't re-import on refresh
         window.history.replaceState({}, '', window.location.pathname);
-        
-        // Could trigger a toast here if we had one
-        console.log("Auto-imported Keka data successfully");
+        setToastMessage('Data imported successfully!');
+        setTimeout(() => setToastMessage(''), 3000);
       } catch (e) {
         console.error("Failed to process auto-import", e);
       }
     }
-  }, []);
+  }, [settings]);
 
   // Persist days when changed
   useEffect(() => {
@@ -144,13 +142,23 @@ const WeeklyDashboard: React.FC<Props> = ({ settings }) => {
 
   const handleImport = (updatedDays: DayLog[]) => {
     setDays(updatedDays);
+    setToastMessage('Import complete!');
+    setTimeout(() => setToastMessage(''), 3000);
   };
 
   return (
-    <div className="space-y-8 animate-in fade-in">
+    <div className="space-y-8 animate-in fade-in relative">
+        {/* Toast Notification */}
+        {toastMessage && (
+            <div className="fixed top-20 left-1/2 -translate-x-1/2 z-50 bg-emerald-600 text-white px-6 py-2 rounded-full shadow-lg font-bold text-sm animate-in slide-in-from-top-4 fade-in">
+                {toastMessage}
+            </div>
+        )}
+
         {showImport && (
             <ImportModal 
                 currentDays={days} 
+                settings={settings}
                 onImport={handleImport} 
                 onClose={() => setShowImport(false)} 
             />
